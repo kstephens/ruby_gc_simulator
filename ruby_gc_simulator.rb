@@ -9,10 +9,10 @@ module Slide
     puts ""
   end
 
-  def render! msg = nil
+  def render! msg = nil, *opts
     slide! msg, <<"END"
 !IMAGE BEGIN DOT
-#{Renderer.new(mem, msg).render!}
+#{Renderer.new(mem, msg, *opts).render!}
 !IMAGE END
 END
   end
@@ -22,19 +22,21 @@ end
 
 class Memory
   include Slide; def mem; self; end
-  attr_accessor :mark_bits
+  attr_accessor :free_list, :mark_bits
 
   def initialize x, *roots
     super()
     @binding = x
     @roots = [ ]
-    @objects = { }
+    @slots = [ ]
+    @object_map = { }
+    @free_list = FreeList.new
     @obj_id = -1
     roots.each { | r | add_root! r }
   end
 
   def mark_bits!
-    @mark_bits = MarkBits.new(@obj_id)
+    @mark_bits = MarkBits.new(@slots.size)
     self
   end
 
@@ -53,27 +55,48 @@ class Memory
   end
 
   def add_object! x
-    @objects[x.object_id] ||= [ x, false, @obj_id += 1 ]
+    # $stderr.puts "add_object!: free_list = #{@free_list.inspect}"
+    obj_id = @object_map[x.object_id] ||= (@free_list.pop || (@obj_id += 1))
+    slot = @slots[obj_id] ||= [ ]
+    slot[0] = x
+    slot[1] = obj_id
+    # $stderr.puts "  add_object! #{x} => #{slot.inspect}"
+    slot
+  end
+  def slot x
+    obj_id = @object_map[x.object_id] and @slots[obj_id]
   end
   def free_object! x
-    x = @objects[x.object_id] and x[0] = nil
+    if x = slot(x)
+      @object_map.delete(x[0].object_id)
+      @free_list.push(x[1])
+      x[0] = nil
+      x[2] = false
+      # $stderr.puts "  free_object!: free_list = #{@free_list.inspect}"
+    end
   end
   def objects
-    @objects.values.sort_by{|x| x[2]}.map{|x| x.first}
+    @slots.map{|x| x.first}
   end
   def obj_id x
-    x = @objects[x.object_id] and x[2]
+    x = slot(x) and x[1]
   end
   def marked? x
-    x = @objects[x.object_id] and x[1]
+    x = slot(x) and x[2]
   end
   def clear_mark! x
-    add_object!(x)[1] = false
-    @mark_bits[obj_id(x)] = false if @mark_bits
+    x = slot(x)
+    x[2] = false
+    @mark_bits[x[1]] = false if @mark_bits
+    # $stderr.puts "  UNMARK: slot = #{x.inspect}"
+    self
   end
   def set_mark! x
-    add_object!(x)[1] = true
-    @mark_bits[obj_id(x)] = true if @mark_bits
+    x = slot(x)
+    # $stderr.puts "  MARK: slot = #{x.inspect}"
+    x[2] = true
+    @mark_bits[x[1]] = true if @mark_bits
+    self
   end
 
   def eval! expr, title = nil, *opts
@@ -97,6 +120,7 @@ end
 
 class Roots < Hash; end
 class MarkBits < Array; end
+class FreeList < Array; end
 
 class Root
   def initialize x
@@ -169,18 +193,20 @@ class Collector
   end
 end
 
-ATOMS = [ nil, true, false, Fixnum, Symbol, Roots, Root, Memory ]
+ATOMS = [ nil, true, false, Fixnum, Symbol, Roots, Root, Memory, FreeList, MarkBits ]
 
 class Renderer
-  def initialize mem = nil, title = nil
+  def initialize mem = nil, title = nil, *opts
     @title = title
+    @opts = opts
     mem!(mem) if mem
   end
 
   def clear!
-    @id = @port = 0
+    @port = 0
     @node_out = ''
     @edge_out = ''
+    @id = 0
     @node_id = { }
     @visited = { }
     self
@@ -190,32 +216,37 @@ class Renderer
     @mem = x
     @roots = @mem.roots
     clear!
-    @rank = 1; node(@mem);
-    @rank = 1; node(@mem.mark_bits)
+    if @opts.include?(:no_mem)
+      @rank = 1; node(@mem);
+      @rank = 1; node(@mem.mark_bits)
+    end
     @rank = 2; node(@roots);
     clear!
-    @rank = 1; node(@mem);
-    @rank = 1; node(@mem.mark_bits)
-    @mem.objects.each { | x | node(x) }
+    if @opts.include?(:no_mem)
+      @rank = 1; node(@mem);
+      @rank = 1; node(@mem.mark_bits)
+      @rank = 1; node(@mem.free_list)
+    end
     @rank = 2; node(@roots);
+    @mem.objects.each { | x | node(x) }
     self
   end
 
   def node_id x
-    @node_id[x.object_id] ||= "node#{x.object_id}".inspect
+    @node_id[x.object_id] ||= "#{x.class}#{@id += 1}".inspect
   end
 
   def node x
     return if x.nil?
+    return if FreeList === x and x.empty?
     return if @visited[x.object_id]
     @visited[x.object_id] = x
     style = ''
-    td_style = ''
 
     added = false
     show_mark = true
     case x
-    when Roots, MarkBits
+    when Roots, MarkBits, FreeList
       show_mark = false
       style << 'style = "dotted"'
     when Memory
@@ -233,8 +264,6 @@ class Renderer
     if added and obj_id = @mem.obj_id(x)
       name << "@#{obj_id}"
     end
-    mark = @mem.marked?(x)
-    td_style << (mark ? 'BGCOLOR="black" COLOR="white"' : '')
 
     rank = nil
 =begin
@@ -252,7 +281,9 @@ class Renderer
     <TR><TD COLSPAN="2" ALIGN="LEFT" PORT="-1">#{name}</TD></TR>
 }
     if show_mark && ! @mem.mark_bits
-      @node_out << %Q{    <TR><TD COLSPAN="2" ALIGN="CENTER" PORT="mark" #{td_style}>#{mark ? "MARK" : "____"}</TD></TR>
+      mark = @mem.marked?(x)
+      td_style = (mark ? 'BGCOLOR="black" COLOR="white"' : nil)
+      @node_out << %Q{    <TR><TD COLSPAN="2" ALIGN="CENTER" PORT="mark" #{td_style}>#{mark ? "MARK" : "----"}</TD></TR>
 }
     end
 
@@ -260,15 +291,31 @@ class Renderer
     when nil, true, false, Numeric, Symbol, String
       @node_out << %Q{<TR><TD COLSPAN="2" ALIGN="LEFT">#{x.inspect}</TD></TR>}
     when Memory
-      x.objects.each { | e | nodes << slot(x, e, :edge_style => 'style = "dashed"') }
+      port = -1
+      x.objects.each { | e | nodes << slot(x, e, :port => port += 1, :edge_style => 'style = "dotted", color = "grey"') }
     when MarkBits
-      x.each { | e | nodes << slot(x, e ? "MARK" : "____", :inspect => false, :node => false) }
+      port = -1
+      x.each { | e | nodes << slot(x, e ? "MARK" : "----",
+                              :style => e ? 'BGCOLOR="black" COLOR="white"' : nil,
+                              :port => port += 1,
+                              :inspect => false,
+                              :node => false) }
+    when FreeList
+      mem_node_id = node_id(@mem)
+      last = %Q{#{node_id(x)}:"-1":e}
+      x.reverse.each do | e |
+        node = %Q{#{mem_node_id}:"#{e}":w}
+        @edge_out << %Q{#{last} -> #{node} [ style = "dashed" ];\n}
+        last = node
+      end
     when Array
-      x.each { | e | nodes << slot(x, e) }
+      port = -1
+      x.each { | e | nodes << slot(x, e, :port => port += 1) }
     when Hash
+      port = -1
       x.keys.sort_by{|k| k.to_s}.each do | k |
         v = x[k]
-        nodes << slot(x, v, :key => k)
+        nodes << slot(x, v, :key => k, :port => port += 1)
       end
     else
       x.instance_variables.each { | k | nodes << slot(x, x.instance_variable_get(k), :key => k) }
@@ -285,14 +332,16 @@ class Renderer
   def slot x, v, opts = { }
     use_k = opts.key?(:key)
     k = opts[:key]
+    style = opts[:style]
     edge_style = opts[:edge_style]
+    port = opts[:port] || (@port += 1)
     @node_out << %Q{    <TR>}
     if use_k
-      @node_out << %Q{<TD ALIGN="RIGHT" PORT="#{@port += 1}">#{k.inspect}</TD><TD}
+      @node_out << %Q{<TD ALIGN="RIGHT">#{k.inspect}</TD><TD}
     else
       @node_out << %Q{<TD COLSPAN="2"}
     end
-    @node_out << %Q{ ALIGN="LEFT" PORT="#{@port += 1}">}
+    @node_out << %Q{ ALIGN="LEFT" PORT="#{port}" #{style} >}
     case v
     when nil, true, false, Fixnum, Symbol
       v = v.inspect unless opts[:inspect] == false
@@ -309,7 +358,7 @@ class Renderer
     end
     @node_out << %Q{</TD></TR>\n}
     if v
-      @edge_out << %Q{#{node_id(x)}:#{@port.to_s.inspect}:e -> #{node_id(v)}:"-1":w [ #{edge_style} ];\n}
+      @edge_out << %Q{#{node_id(x)}:#{port.to_s.inspect}:e -> #{node_id(v)}:"-1":w [ #{edge_style} ];\n}
     end
     v
   end
@@ -330,7 +379,7 @@ class Renderer
   end
 
   def render!
-    # return self
+    return self
     @@file_id ||= 0
     @@file_id += 1
     @file_id = "%03d" % @@file_id
@@ -347,12 +396,22 @@ class Renderer
 
 end
 
+######################################################################
+
 Slide.slide! "CRuby GC", <<'END'
 * Kurt Stephens
 * Enova Financial
 * 2012/02/10
 * Code: "":http://github.com/kstephens/ruby_gc_simulator
 * Slides: "":http://kurtstephens.com/pub/ruby/ruby_gc_simulator/ruby_gc_simulator/
+END
+
+mem = Memory.new(binding, :x, :y)
+
+mem.eval! <<'END', 'Initial Object Graph'
+x = [ 0, 1, "two", "three", :four, 3.14159, 123456781234567812345678 ]
+y = { :a => 1, :b => "bee" }
+x << y
 END
 
 Slide.slide! "Mark and Sweep", <<'END'
@@ -373,14 +432,6 @@ Slide.slide! "Roots", <<'END'
 * Local Variables : binding, caller
 * self, &block
 * Internals: rb_global_variable(), VALUEs on C stack.
-END
-
-mem = Memory.new(binding, :x, :y)
-
-mem.eval! <<'END', 'Initial Object Graph'
-x = [ 0, 1, "two", "three", :four, 3.14159, 123456781234567812345678 ]
-y = { :a => 1, :b => "bee" }
-x << y
 END
 
 mem.eval! <<'END', 'Remove reference to "three"', :before
@@ -412,9 +463,10 @@ end
 Collector.new(mem).collect!
 
 Slide.slide! "Mark And Sweep Is Expensive", <<'END'
-* Every object is read.
+* Every reachable object is read.
 * Every mark bit is read and mutated.
-* Even if most of objects are not garbage (Modules => Methods & CONSTANTS).
+* Even if most of objects are not garbage (Modules, Methods, CONSTANTS, literals).
+* Every freed object is mutated due to free list.
 END
 
 Slide.slide! "Coding Styles affect GC", <<'END'
@@ -422,6 +474,10 @@ Slide.slide! "Coding Styles affect GC", <<'END'
 * Shared String buffers reduce memory usage, but do not improve GC times.
 * Every Float, Bignum math operation creates a new Object.
 * Use String#<<, not String#+.
+END
+
+mem.eval! <<'END', "Set with Literal", :before
+x[3] = "three, again!"
 END
 
 Slide.slide! "Mark bits", <<'END'
