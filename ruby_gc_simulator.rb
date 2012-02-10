@@ -429,6 +429,7 @@ h2. Copy-On-Write pages after process fork().
 
 * CRuby <2.0
 ** Mark bits are at the head of each object.
+** Faster, but page mutations happen *everywhere*.
 * REE, CRuby 2.0 (HEAD)
 ** Mark bits are stored in external arrays.
 ** Slower.
@@ -438,12 +439,12 @@ mem.mark_bits!
 Collector.new(mem).mark_roots!("With Mark Bits")
 
 Slide.slide! "JRuby, Rubinius", <<'END'
-* Rubinius has multiple colectors.
+* Rubinius has multiple collectors.
 * JVM Collectors are highly-tuned.
 * Some Commercial JVMS have *very* performant collectors.
 END
 
-Slide.slide! "Other GC", <<'END'
+Slide.slide! "Other GC Features", <<'END'
 * Parallel Sweep - not seen yet.
 * Parallel Mark - prototype presented at RubyConf 2011.
 * Lazy Sweep - already in CRuby
@@ -452,6 +453,7 @@ Slide.slide! "Other GC", <<'END'
 ** Needs Write Barrier
 * Generational - difficult, unlikely.
 ** Needs Write Barrier
+* Weak References
 END
 
 Slide.slide! "CRuby GC Options", <<'END'
@@ -459,17 +461,25 @@ h2. mem_api - "":http://github.com/kstephens/ruby
 * Runtime hooks for different GCs/memory systems.
 * Malloc-only
 * Core
-* BDW
-* SMAL - "":http://github.com/kstephens/smal
+* BDW (in-progress)
+* SMAL - "":http://github.com/kstephens/smal (in-progress)
 END
 
-Slide.slide! "Weak References", <<'END'
+Slide.slide! "Weak Reference", <<'END'
+* Weak Reference only maintains its reference, iff one or more non-weak refereence also exist.
+* Useful for caching.
+* Soft References release references when under "memory pressure"
+* Reference Queues contain dead Weak References.
+END
+
+Slide.slide! "Weak Reference Support", <<'END'
 * JRuby
 ** Weak References, Soft References, Reference Queues.
-* Rubinius.
+* Rubinius
 ** Weak References
-* CRuby - not well supported.
-** ref: "":http://github.com/kstephens/ref - Weak, Soft, RefQueues
+* CRuby
+** ref - "":http://github.com/kstephens/ref : Weak, Soft, RefQueues
+** Needs mem_api.
 END
 
 Slide.slide! "Generational GC", <<'END'
