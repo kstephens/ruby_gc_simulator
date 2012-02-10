@@ -351,8 +351,8 @@ Slide.slide! "CRuby GC", <<'END'
 * Kurt Stephens
 * Enova Financial
 * 2012/02/10
-* Code: http://github.com/kstephens/ruby_gc_simulator
-* Slides: http://kurtstephens.com/pub/ruby/ruby_gc_simulator/ruby_gc_simulator/
+* Code: "":http://github.com/kstephens/ruby_gc_simulator
+* Slides: "":http://kurtstephens.com/pub/ruby/ruby_gc_simulator/ruby_gc_simulator/
 END
 
 Slide.slide! "Mark and Sweep", <<'END'
@@ -448,19 +448,19 @@ Slide.slide! "Other GC", <<'END'
 * Parallel Mark - prototype presented at RubyConf 2011.
 * Lazy Sweep - already in CRuby
 * N-color marking
-** Tredmill - https://github.com/kstephens/tredmill
+** Tredmill - "":https://github.com/kstephens/tredmill
 ** Needs Write Barrier
 * Generational - difficult, unlikely.
 ** Needs Write Barrier
 END
 
 Slide.slide! "CRuby GC Options", <<'END'
-h2. mem_api - http://github.com/kstephens/ruby
+h2. mem_api - "":http://github.com/kstephens/ruby
 * Runtime hooks for different GCs/memory systems.
 * Malloc-only
 * Core
 * BDW
-* SMAL - http://github.com/kstephens/smal
+* SMAL - "":http://github.com/kstephens/smal
 END
 
 Slide.slide! "Weak References", <<'END'
@@ -469,7 +469,7 @@ Slide.slide! "Weak References", <<'END'
 * Rubinius.
 ** Weak References
 * CRuby - not well supported.
-** ref: http://github.com/kstephens/ref - Weak, Soft, RefQueues
+** ref: "":http://github.com/kstephens/ref - Weak, Soft, RefQueues
 END
 
 Slide.slide! "Generational GC", <<'END'
