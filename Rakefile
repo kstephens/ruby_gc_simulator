@@ -6,7 +6,7 @@ task :slides => 'ruby_gc_simulator/index.html'
 
 file 'ruby_gc_simulator/index.html' => 'ruby_gc_simulator.textile' do
   sh "../scarlet/bin/scarlet -f html ruby_gc_simulator.textile"
-  sh "open ruby_gc_simulator/index.html"
+  sh "open ruby_gc_simulator/index.html" if ENV['open']
 end
 
 file 'ruby_gc_simulator.textile' => 'ruby_gc_simulator.rb' do

@@ -362,9 +362,9 @@ h2. Mark
 * Recursively.
 
 h2. Sweep
-* For all objects in memory:
-** Free unmarked objects.
-** Unmark marked objects.
+* For all objects in memory,
+* Free unmarked objects,
+* Unmark marked objects.
 END
 
 Slide.slide! "Roots", <<'END'
