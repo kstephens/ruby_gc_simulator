@@ -406,6 +406,13 @@ Slide.slide! "CRuby GC", <<'END'
 * Slides: "":http://kurtstephens.com/pub/ruby/ruby_gc_simulator/ruby_gc_simulator/
 END
 
+mem2 = Memory.new(binding, :a, :b, :c)
+
+mem2.eval! <<'END', 'Circular Object Graph'
+a = [ nil ]; b = [ a ]; c = [ b ]
+a[0] = c; b = c = nil;
+END
+
 mem = Memory.new(binding, :x, :y)
 
 mem.eval! <<'END', 'Initial Object Graph'
