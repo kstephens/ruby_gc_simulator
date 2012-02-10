@@ -55,7 +55,8 @@ class Memory
   end
 
   def roots
-    e = Roots.new
+    e = @roots_obj ||= Roots.new
+    e.clear
     @roots.each do | r |
       e[r] = eval(r.to_s, @binding)
     end
@@ -110,7 +111,7 @@ class Memory
 
   def eval! title, expr, opts = nil
     opts ||= { }
-    unless opts[:slide] != false
+    if opts[:slide] != false
       slide! title, <<"END"
 
 @@@ ruby
@@ -157,8 +158,9 @@ class Collector
   end
 
   def mark_roots! msg = "Mark roots"
-    render! "GC: #{msg}"
-    mem.roots.each do | k, v |
+    roots = mem.roots
+    render! "GC: #{msg}", :highlight_objects => [ roots ]
+    roots.each do | k, v |
       mark!(v)
     end
   end
@@ -259,7 +261,7 @@ class Renderer
     case x
     when Roots, MarkBits, FreeList, Memory
       show_mark = false
-      style << 'style = "dotted"'
+      style << 'style = "dotted"' << "\n"
     when *ATOMS
     else
       @mem.add_object!(x)
@@ -271,6 +273,10 @@ class Renderer
     name = "#{x.class}"
     if added and obj_id = @mem.obj_id(x)
       name << "@#{obj_id}"
+    end
+
+    if ho = @opts[:highlight_objects] and ho.include?(x)
+      style << "penwidth = 10\n"
     end
 
     rank = nil
@@ -542,6 +548,19 @@ h2. mem_api - "":http://github.com/kstephens/ruby
 * SMAL - "":http://github.com/kstephens/smal (in-progress)
 END
 
+Slide.slide! "Generational GC", <<'END'
+* Youngest objects are likely to be garbage.
+* Younger objects are likely refer to older objects.
+* Older objects are less likely to change or point to younger objects.
+END
+
+Slide.slide! "Generational GC Is Hard", <<'END'
+* Write Barrier needed to keep track of changes to older or already marked objects.
+* Need to keep track of references from older generations to new generations.
+* CRuby API makes write barrier difficult.
+* Lua handles this by never exposing objects directly; stack only.
+END
+
 Slide.slide! "Weak Reference", <<'END'
 * Weak Reference only maintains its reference, iff one or more non-weak refereence also exist.
 * Useful for caching.
@@ -559,18 +578,6 @@ Slide.slide! "Weak Reference Support", <<'END'
 ** Needs mem_api.
 END
 
-Slide.slide! "Generational GC", <<'END'
-* Youngest objects are likely to be garbage.
-* Younger objects are likely refer to older objects.
-* Older objects are less likely to change or point to younger objects.
-END
-
-Slide.slide! "Generational GC Is Hard", <<'END'
-* Write Barrier needed to keep track of changes to older or already marked objects.
-* Need to keep track of references from older generations to new generations.
-* CRuby API makes write barrier difficult.
-* Lua handles this by never exposing objects directly; stack only.
-END
 
 Slide.slide! "Questions", <<'END'
 END
