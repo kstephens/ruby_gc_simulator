@@ -351,6 +351,8 @@ Slide.slide! "CRuby GC", <<'END'
 * Kurt Stephens
 * Enova Financial
 * 2012/02/10
+* Code: http://github.com/kstephens/ruby_gc_simulator
+* Slides: http://kurtstephens.com/pub/ruby/ruby_gc_simulator/ruby_gc_simulator/
 END
 
 Slide.slide! "Mark and Sweep", <<'END'
