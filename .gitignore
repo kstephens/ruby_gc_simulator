@@ -1,0 +1,3 @@
+*.gv
+ruby_gc_simulator.textile
+ruby_gc_simulator/
