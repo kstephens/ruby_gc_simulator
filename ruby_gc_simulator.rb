@@ -1,18 +1,27 @@
 
 
 module Slide
-  def slide! title, body = nil
+  def slide! title, body, opts = nil
+    opts ||= { }
     puts "!SLIDE"
     puts "h1. #{title}"
     puts ""
     puts body
     puts ""
+    if opts[:graph]
+      puts <<"END"
+!IMAGE BEGIN DOT
+#{Renderer.new(mem, title, opts).render!}
+!IMAGE END
+END
+    end
   end
 
-  def render! msg = nil, *opts
-    slide! msg, <<"END"
+  def render! title = nil, opts = nil
+    opts ||= { }
+    slide! title, <<"END", opts
 !IMAGE BEGIN DOT
-#{Renderer.new(mem, msg, *opts).render!}
+#{Renderer.new(mem, title, opts).render!}
 !IMAGE END
 END
   end
@@ -99,8 +108,9 @@ class Memory
     self
   end
 
-  def eval! expr, title = nil, *opts
-    unless opts.include?(:no_slide)
+  def eval! title, expr, opts = nil
+    opts ||= { }
+    unless opts[:slide] != false
       slide! title, <<"END"
 
 @@@ ruby
@@ -110,11 +120,11 @@ class Memory
 @@@
 END
     end
-    if before = opts.include?(:before)
+    if opts[:before]
       render! "#{title} : Before"
     end
     eval(expr, @binding)
-    render! "#{title}#{before ? ' : After ' : nil}"
+    render! "#{title}#{opts[:before] ? ' : After ' : nil}", opts
   end
 end
 
@@ -196,9 +206,9 @@ end
 ATOMS = [ nil, true, false, Fixnum, Symbol, Roots, Root, Memory, FreeList, MarkBits ]
 
 class Renderer
-  def initialize mem = nil, title = nil, *opts
+  def initialize mem = nil, title = nil, opts = nil
     @title = title
-    @opts = opts
+    @opts = opts ||= { }
     mem!(mem) if mem
   end
 
@@ -216,13 +226,14 @@ class Renderer
     @mem = x
     @roots = @mem.roots
     clear!
-    if @opts.include?(:no_mem)
+    # $stderr.puts "  #{self.class} #{@title} opts = #{@opts.inspect}\n#{caller * "\n"}\n"
+    if @opts[:render_memory] != false
       @rank = 1; node(@mem);
       @rank = 1; node(@mem.mark_bits)
     end
     @rank = 2; node(@roots);
     clear!
-    if @opts.include?(:no_mem)
+    if @opts[:render_memory] != false
       @rank = 1; node(@mem);
       @rank = 1; node(@mem.mark_bits)
       @rank = 1; node(@mem.free_list)
@@ -246,12 +257,9 @@ class Renderer
     added = false
     show_mark = true
     case x
-    when Roots, MarkBits, FreeList
+    when Roots, MarkBits, FreeList, Memory
       show_mark = false
       style << 'style = "dotted"'
-    when Memory
-      show_mark = false
-      style << 'style = "dotted", pos = "0,0!" '
     when *ATOMS
     else
       @mem.add_object!(x)
@@ -408,14 +416,14 @@ END
 
 mem2 = Memory.new(binding, :a, :b, :c)
 
-mem2.eval! <<'END', 'Circular Object Graph'
+mem2.eval! 'Circular Object Graph', <<'END', :render_memory => false
 a = [ nil ]; b = [ a ]; c = [ b ]
 a[0] = c; b = c = nil;
 END
 
 mem = Memory.new(binding, :x, :y)
 
-mem.eval! <<'END', 'Initial Object Graph'
+mem.eval! 'Initial Object Graph', <<'END', :render_memory => false
 x = [ 0, 1, "two", "three", :four, 3.14159, 123456781234567812345678 ]
 y = { :a => 1, :b => "bee" }
 x << y
@@ -441,14 +449,18 @@ Slide.slide! "Roots", <<'END'
 * Internals: rb_global_variable(), VALUEs on C stack.
 END
 
-mem.eval! <<'END', 'Remove reference to "three"', :before
+mem.eval! 'Remove reference to "three"', <<'END', :before => true
 x[3] = nil
 END
 
 Collector.new(mem).collect!
 
-mem.eval! <<'END', 'Remove References to Hash', :before
-y = x[-1] = nil
+mem.eval! 'Remove References to Hash', <<'END', :before => true
+y = nil
+END
+
+mem.eval! 'Remove References to Hash', <<'END'
+x[-1] = nil
 END
 
 Collector.new(mem).collect!
@@ -462,7 +474,7 @@ x.pop; x.pop; x.pop
 END
 
 3.times do
-  mem.eval! <<'END', 'x.pop', :no_slide
+  mem.eval! 'x.pop', <<'END', :slide => false
 x.pop
 END
 end
@@ -481,9 +493,11 @@ Slide.slide! "Coding Styles affect GC", <<'END'
 * Shared String buffers reduce memory usage, but do not improve GC times.
 * Every Float, Bignum math operation creates a new Object.
 * Use String#<<, not String#+.
+* big_enumerable.clear
+* heavy_object = nil
 END
 
-mem.eval! <<'END', "Set with Literal", :before
+mem.eval! "Set with Literal", <<'END', :before => true
 x[3] = "three, again!"
 END
 
