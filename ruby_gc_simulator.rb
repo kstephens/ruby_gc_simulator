@@ -111,6 +111,11 @@ class Memory
     @mark_bits[x[1]] = true if @mark_bits
     self
   end
+  def clear_marks!
+    @slots.each { | x | x[2] = false }
+    @mark_bits and @mark_bits.size.times { | i | @mark_bits[i] = false }
+    self
+  end
 
   def eval! title, expr, opts = nil
     opts ||= { }
@@ -175,6 +180,7 @@ class Collector
   def collect!
     mark_roots!
     sweep!
+    self
   end
 
   def mark_roots! title = "Mark roots"
@@ -210,6 +216,7 @@ class Collector
         end
         render! "GC: Mark #{x.class}@#{mem.obj_id(x)}", r_opts
       end
+
       case x
       when WeakRef
         # NOTHING
@@ -624,6 +631,7 @@ END
 mem.mark_bits!
 Collector.new(mem).mark_roots!("With Mark Bits")
 mem.mark_bits = nil
+mem.clear_marks!
 
 Slide.slide! "JRuby, Rubinius", <<'END'
 * Rubinius has multiple collectors.
