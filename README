@@ -1,3 +1,6 @@
 
 Generated Slides:  http://kurtstephens.com/pub/ruby/ruby_gc_simulator/ruby_gc_simulator/index.html
 
+run rake
+
+Needs ../scarlet : see http://github.com/kstephens/scarlet

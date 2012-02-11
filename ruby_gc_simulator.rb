@@ -6,8 +6,10 @@ module Slide
     puts "!SLIDE"
     puts "h1. #{title}"
     puts ""
-    puts body
-    puts ""
+    if body
+      puts body
+      puts ""
+    end
     if opts[:graph]
       puts <<"END"
 !IMAGE BEGIN DOT
@@ -20,6 +22,7 @@ END
   def render! title = nil, opts = nil
     opts ||= { }
     slide! title, <<"END", opts
+#{opts[:body]}
 !IMAGE BEGIN DOT
 #{Renderer.new(mem, title, opts).render!}
 !IMAGE END
@@ -60,7 +63,7 @@ class Memory
     @roots.each do | r |
       e[r] = eval(r.to_s, @binding)
     end
-    # $stderr.puts " e = #{e.inspect}"
+    # $stderr.puts " e = #{e.class} #{e.object_id} size=#{e.size}"
     e
   end
 
@@ -111,6 +114,13 @@ class Memory
 
   def eval! title, expr, opts = nil
     opts ||= { }
+    if opts[:with_expr]
+      opts[:body] ||= %Q{@@@ ruby
+
+#{expr}
+
+@@@}
+    end
     if opts[:slide] != false
       slide! title, <<"END"
 
@@ -122,7 +132,7 @@ class Memory
 END
     end
     if opts[:before]
-      render! "#{title} : Before"
+      render! "#{title} : Before", opts
     end
     eval(expr, @binding)
     render! "#{title}#{opts[:before] ? ' : After ' : nil}", opts
@@ -132,24 +142,34 @@ end
 class Roots < Hash; end
 class MarkBits < Array; end
 class FreeList < Array; end
+class WeakRef; attr_accessor :value; end
+class RefQueue < Array; end
 
 class Root
+  attr_accessor :name
   def initialize x
     @name = x
   end
+  def == other
+    self.class === other and @name == other.name
+  end
   def inspect
-    @name.inspect
+    @inspect ||=
+      @name.inspect.freeze
   end
   def to_s
-    @name.to_s
+    @to_s ||=
+      @name.to_s.freeze
   end
 end
 
 class Collector
   include Slide
-  attr_reader :mem
-  def initialize mem
+  attr_reader :mem, :opts
+
+  def initialize mem, opts = nil
     @mem = mem
+    @opts = opts ||= { }
   end
 
   def collect!
@@ -157,50 +177,102 @@ class Collector
     sweep!
   end
 
-  def mark_roots! msg = "Mark roots"
+  def mark_roots! title = "Mark roots"
     roots = mem.roots
-    render! "GC: #{msg}", :highlight_objects => [ roots ]
-    roots.each do | k, v |
-      mark!(v)
+    render! "GC: #{title}", :highlight_objects => [ roots ]
+    roots.keys.sort_by{|k| k.to_s}.each do | k |
+      v = roots[k]
+      mark!(v, roots, k)
     end
   end
 
-  def mark! x
+  def mark! x, referrer = nil, referrer_slot = nil
     case x
     when *ATOMS
       return
     end
     unless mem.marked?(x)
       mem.set_mark!(x)
-      render! "GC: Mark #{x.class}@#{mem.obj_id(x)}"
+      if opts[:render_mark!] != false
+        r_opts = opts.dup
+        r_opts[:highlight_objects] = [ x ]
+        r_opts[:highlight_slots] = [ ]
+        if @mark_bits
+          r_opts[:highlight_slots] << [ @mark_bits, mem.obj_id(x) ]
+        end
+        if referrer
+          if referrer_slot
+            r_opts[:highlight_slots] << [ referrer, referrer_slot ]
+            r_opts[:highlight_edges] = [ [ referrer, referrer_slot, x ] ]
+          else
+            r_opts[:highlight_objects] << referrer
+          end
+        end
+        render! "GC: Mark #{x.class}@#{mem.obj_id(x)}", r_opts
+      end
       case x
+      when WeakRef
+        # NOTHING
       when Array
-        x.each { | e | mark!(e) }
+        slot = -1
+        x.each { | e | mark!(e, x, slot += 1) }
       when Hash
-        x.each { | k, v | mark!(k); mark!(v) }
+        slot = -1
+        x.keys.sort_by{|k| k.to_s}.each do | k |
+          v = x[k]; 
+          mark!(k, x);
+          mark!(v, x, slot += 1)
+        end
       else
-        x.instance_variables.each { | v | mark!(x.instance_variable_get(v)) }
+        slot = -1
+        x.instance_variables.sort.each do | k |
+          mark!(x.instance_variable_get(k), x, slot += 1)
+        end
       end
     end
   end
 
-  def sweep!
-    render! "GC: Before Sweep"
+  def sweep! opts = nil
+    opts ||= { }
+    render! "GC: Before Sweep", opts
+
+    freed_objects = [ ]
+
     obj_id = -1
     mem.objects.each do | x |
+      obj_id += 1
       next if x.nil?
-      name = "#{x.class}@#{obj_id += 1}"
+      name = "#{x.class}@#{obj_id}"
+      r_opts = opts.dup
+      r_opts[:highlight_objects] = [ x ]
+      r_opts[:highlight_slots] = [ [ mem, obj_id ] ]
+      r_opts[:highlight_edges] = [ [ mem, obj_id, x ] ]
       if mem.marked?(x)
         name << " : unmark"
         mem.clear_mark!(x)
+        render! "GC: Sweep #{name}", r_opts
       else
         name << " : free"
+        render! "GC: Sweep #{name}", r_opts
         mem.free_object!(x)
+        freed_objects << x
       end
-      @highlight_memory_obj_id = obj_id
-      render! "GC: Sweep #{name}"
     end
-    render! "GC: After Sweep"
+
+    weak_refs_lost = [ ]
+    mem.objects.
+      select{|wr| WeakRef === wr and freed_objects.include?(wr.value) }.
+      each do | wr |
+      wr.value = nil
+      weak_refs_lost << wr
+    end
+
+    r_opts = opts.dup
+    unless weak_refs_lost
+      r_opts[:highlight_objects] = weak_refs_lost
+    end
+    render! "GC: After Sweep (freed #{freed_objects.size})", r_opts
+
     self
   end
 end
@@ -229,12 +301,15 @@ class Renderer
     @roots = @mem.roots
     clear!
     # $stderr.puts "  #{self.class} #{@title} opts = #{@opts.inspect}\n#{caller * "\n"}\n"
+    @ref_count_new = { }
     if @opts[:render_memory] != false
       @rank = 1; node(@mem);
       @rank = 1; node(@mem.mark_bits)
     end
     @rank = 2; node(@roots);
     clear!
+    @ref_count = @ref_count_new
+    @ref_count_new = nil
     if @opts[:render_memory] != false
       @rank = 1; node(@mem);
       @rank = 1; node(@mem.mark_bits)
@@ -274,9 +349,12 @@ class Renderer
     if added and obj_id = @mem.obj_id(x)
       name << "@#{obj_id}"
     end
+    if @opts[:show_ref_count] and obj_id and @ref_count and rc = @ref_count[x.object_id]
+      name << " rc=#{rc}"
+    end
 
     if ho = @opts[:highlight_objects] and ho.include?(x)
-      style << "penwidth = 10\n"
+      style << %Q{color = "red"\n}
     end
 
     rank = nil
@@ -323,16 +401,21 @@ class Renderer
         last = node
       end
     when Array
-      port = -1
-      x.each { | e | nodes << slot(x, e, :port => port += 1) }
+      i = -1
+      x.each do | e |
+        nodes << slot(x, e, :port => i += 1)
+      end
     when Hash
-      port = -1
+      i = -1
       x.keys.sort_by{|k| k.to_s}.each do | k |
         v = x[k]
-        nodes << slot(x, v, :key => k, :port => port += 1)
+        nodes << slot(x, v, :key => k, :port => i += 1)
       end
     else
-      x.instance_variables.each { | k | nodes << slot(x, x.instance_variable_get(k), :key => k) }
+      i = -1
+      x.instance_variables.sort.each do | k |
+        nodes << slot(x, x.instance_variable_get(k), :key => k, :port => i += 1)
+      end
     end
     @node_out << %Q{
   </TABLE>
@@ -346,24 +429,31 @@ class Renderer
   def slot x, v, opts = { }
     use_k = opts.key?(:key)
     k = opts[:key]
-    style = opts[:style]
-    edge_style = opts[:edge_style]
+    i = opts[:index] || opts[:port] || k
+    style = (opts[:style] || '').dup
+    edge_style = (opts[:edge_style] || '').dup
     port = opts[:port] || (@port += 1)
+
+    hs = @opts[:highlight_slots] and hs = hs.find{|e| match_slot?(x, i, e)}
+    he = @opts[:highlight_edges] and he = he.select{|e| match_slot?(x, i, e)}
+    style << %Q{color="red"\n} if hs
+
     @node_out << %Q{    <TR>}
     if use_k
-      @node_out << %Q{<TD ALIGN="RIGHT">#{k.inspect}</TD><TD}
+      k = k.inspect if opts[:inspect] != false
+      @node_out << %Q{<TD ALIGN="RIGHT">#{k}</TD><TD}
     else
       @node_out << %Q{<TD COLSPAN="2"}
     end
     @node_out << %Q{ ALIGN="LEFT" PORT="#{port}" #{style} >}
     case v
     when nil, true, false, Fixnum, Symbol
-      v = v.inspect unless opts[:inspect] == false
+      v = v.inspect if opts[:inspect] != false
       @node_out << "#{v}"
       v = nil
     else
       if opts[:node] == false
-        v = v.inspect unless opts[:inspect] == false
+        v = v.inspect if opts[:inspect] != false
         @node_out << "#{v}"
         v = nil
       else
@@ -372,9 +462,22 @@ class Renderer
     end
     @node_out << %Q{</TD></TR>\n}
     if v
+      he and he = he.find{|e| e[2] == v}
+      edge_style << %Q{color="red"\n} if he
       @edge_out << %Q{#{node_id(x)}:#{port.to_s.inspect}:e -> #{node_id(v)}:"-1":w [ #{edge_style} ];\n}
+      if @ref_count_new
+        @ref_count_new[v.object_id] ||= 0
+        @ref_count_new[v.object_id] += 1
+      end
     end
     v
+  end
+
+  def match_slot? x, i, e
+    if Array === x and i < 0
+      i += x.size
+    end
+    e[0].object_id == x.object_id and e[1] == i
   end
 
   def to_s
@@ -420,6 +523,7 @@ Slide.slide! "CRuby GC", <<'END'
 * Slides: "":http://kurtstephens.com/pub/ruby/ruby_gc_simulator/ruby_gc_simulator/
 END
 
+a = b = c = nil
 mem2 = Memory.new(binding, :a, :b, :c)
 
 mem2.eval! 'Circular Object Graph', <<'END', :render_memory => false
@@ -427,6 +531,9 @@ a = [ nil ]; b = [ a ]; c = [ b ]
 a[0] = c; b = c = nil;
 END
 
+mem2.slide! 'Ref Counts', nil, :graph => true, :render_memory => false, :show_ref_count => true
+
+x = y = nil
 mem = Memory.new(binding, :x, :y)
 
 mem.eval! 'Initial Object Graph', <<'END', :render_memory => false
@@ -455,17 +562,17 @@ Slide.slide! "Roots", <<'END'
 * Internals: rb_global_variable(), VALUEs on C stack.
 END
 
-mem.eval! 'Remove reference to "three"', <<'END', :before => true
+mem.eval! 'Remove reference to "three"', <<'END', :highlight_slots => [ [ x, 3 ] ], :before => true
 x[3] = nil
 END
 
 Collector.new(mem).collect!
 
-mem.eval! 'Remove References to Hash', <<'END', :before => true
+mem.eval! 'Remove References to Hash', <<'END', :highlight_slots => [ [ mem.roots, Root.new(:y) ] ], :before => true
 y = nil
 END
 
-mem.eval! 'Remove References to Hash', <<'END'
+mem.eval! 'Remove References to Hash', <<'END', :highlight_slots => [ [ x, -1 ] ]
 x[-1] = nil
 END
 
@@ -503,10 +610,6 @@ Slide.slide! "Coding Styles affect GC", <<'END'
 * heavy_object = nil
 END
 
-mem.eval! "Set with Literal", <<'END', :before => true
-x[3] = "three, again!"
-END
-
 Slide.slide! "Mark bits", <<'END'
 h2. Copy-On-Write pages after process fork().
 
@@ -520,6 +623,7 @@ END
 
 mem.mark_bits!
 Collector.new(mem).mark_roots!("With Mark Bits")
+mem.mark_bits = nil
 
 Slide.slide! "JRuby, Rubinius", <<'END'
 * Rubinius has multiple collectors.
@@ -561,9 +665,13 @@ Slide.slide! "Generational GC Is Hard", <<'END'
 * Lua handles this by never exposing objects directly; stack only.
 END
 
+mem.eval! "Mutate older object", <<'END', :before => true, :slide => false, :with_expr => true, :highlight_slots => [ [ x, 3 ] ]
+x[3] = "three, again!"
+END
+
 Slide.slide! "Weak Reference", <<'END'
-* Weak Reference only maintains its reference, iff one or more non-weak refereence also exist.
 * Useful for caching.
+* A Weak Reference maintain its reference, iff one or more non-weak reference also exist.
 * Soft References release references when under "memory pressure"
 * Reference Queues contain dead Weak References.
 END
