@@ -242,9 +242,10 @@ class Collector
     end
   end
 
-  def sweep! opts = nil
-    opts ||= { }
-    render! "GC: Before Sweep", opts
+  def sweep!
+    r_opts = opts.dup
+    r_opts[:highlight_objects] = [ mem ]
+    render! "GC: Before Sweep", r_opts
 
     freed_objects = [ ]
 
