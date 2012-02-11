@@ -237,7 +237,7 @@ class Collector
       when Hash
         slot = -1
         x.keys.sort_by{|k| k.to_s}.each do | k |
-          v = x[k]; 
+          v = x[k]
           mark!(k, x);
           mark!(v, x, slot += 1)
         end
@@ -261,6 +261,7 @@ class Collector
     mem.objects.each do | x |
       obj_id += 1
       next if x.nil?
+
       name = "#{x.class}@#{obj_id}"
       r_opts = opts.dup
       r_opts[:highlight_objects] = [ x ]
@@ -456,7 +457,7 @@ class Renderer
     else
       i = -1
       x.instance_variables.sort.each do | k |
-        nodes << slot(x, x.instance_variable_get(k), :key => k, :port => i += 1)
+        nodes << slot(x, x.instance_variable_get(k), :key => k.to_sym, :port => i += 1)
       end
     end
     @node_out << %Q{
@@ -482,7 +483,7 @@ class Renderer
 
     @node_out << %Q{    <TR>}
     if use_k
-      k = k.inspect if opts[:inspect] != false
+      k = k.inspect if opts[:inspect_key] != false
       @node_out << %Q{<TD ALIGN="RIGHT">#{k}</TD><TD}
     else
       @node_out << %Q{<TD COLSPAN="2"}
@@ -634,7 +635,7 @@ x.pop
 END
 end
 
-Collector.new(mem).collect!
+Collector.new(mem, :render_mark! => false, :render_sweep! => false).collect!
 
 Slide.slide! "Mark And Sweep Is Expensive", <<'END'
 * Every reachable object is read.
@@ -744,6 +745,7 @@ Slide.slide! "Weak Reference Support", <<'END'
 END
 
 
-Slide.slide! "Questions", <<'END'
+Slide.slide! "Q&A", <<'END'
+* Slides generated with Scarlet - "":http://github.com/kstephens/scarlet
 END
 
