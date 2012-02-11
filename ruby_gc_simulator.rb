@@ -44,6 +44,7 @@ class Memory
     @object_map = { }
     @free_list = FreeList.new
     @obj_id = -1
+    @age = -1
     roots.each { | r | add_root! r }
   end
 
@@ -73,6 +74,7 @@ class Memory
     slot = @slots[obj_id] ||= [ ]
     slot[0] = x
     slot[1] = obj_id
+    slot[3] ||= @age += 1
     # $stderr.puts "  add_object! #{x} => #{slot.inspect}"
     slot
   end
@@ -85,6 +87,7 @@ class Memory
       @free_list.push(x[1])
       x[0] = nil
       x[2] = false
+      x[3] = nil
       # $stderr.puts "  free_object!: free_list = #{@free_list.inspect}"
     end
   end
@@ -93,6 +96,9 @@ class Memory
   end
   def obj_id x
     x = slot(x) and x[1]
+  end
+  def age x
+    x = slot(x) and x[3]
   end
   def marked? x
     x = slot(x) and x[2]
@@ -391,6 +397,9 @@ class Renderer
     end
     if @opts[:show_ref_count] and obj_id and @ref_count and rc = @ref_count[x.object_id]
       name << " rc=#{rc}"
+    end
+    if @opts[:show_age] and obj_id and age = @mem.age(x)
+      name << " age=#{age}"
     end
 
     if ho = @opts[:highlight_objects] and ho.include?(x)
@@ -709,7 +718,7 @@ Slide.slide! "Generational GC Is Hard", <<'END'
 * Lua handles this by never exposing objects directly; stack only.
 END
 
-mem.eval! "Mutate older object", <<'END', :before => true, :slide => false, :with_expr => true, :highlight_slots => [ [ x, 3 ] ]
+mem.eval! "Mutate older object", <<'END', :before => true, :slide => false, :with_expr => true, :highlight_slots => [ [ x, 3 ] ], :show_age => true
 x[3] = "three, again!"
 END
 
