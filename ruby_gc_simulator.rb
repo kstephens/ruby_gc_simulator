@@ -119,6 +119,7 @@ class Memory
 
   def eval! title, expr, opts = nil
     opts ||= { }
+    add_roots = opts.delete(:add_roots)
     if opts[:with_expr]
       opts[:body] ||= %Q{@@@ ruby
 
@@ -140,6 +141,8 @@ END
       render! "#{title} : Before", opts
     end
     eval(expr, @binding)
+    ho = opts[:highlight_objects] and ho.map!{|ho| Symbol === ho ? eval(ho.to_s, @binding) : ho}
+    add_roots and add_roots.each { | r | add_root! r }
     render! "#{title}#{opts[:before] ? ' : After ' : nil}", opts
   end
 end
