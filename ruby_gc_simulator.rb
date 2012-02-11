@@ -150,8 +150,16 @@ end
 class Roots < Hash; end
 class MarkBits < Array; end
 class FreeList < Array; end
-class WeakRef; attr_accessor :value; end
-class RefQueue < Array; end
+class WeakRef
+  attr_accessor :value, :ref_queue
+  def initialize obj; @value = obj; end
+end
+class RefQueue < Array
+  def add! wr
+    wr.ref_queue = self
+    wr
+  end
+end
 
 class Root
   attr_accessor :name
@@ -261,27 +269,47 @@ class Collector
       if mem.marked?(x)
         name << " : unmark"
         mem.clear_mark!(x)
-        render! "GC: Sweep #{name}", r_opts
+        render! "GC: Sweep #{name}", r_opts if opts[:render_sweep!] != false
       else
         name << " : free"
-        render! "GC: Sweep #{name}", r_opts
+        render! "GC: Sweep #{name}", r_opts if opts[:render_sweep!] != false
         mem.free_object!(x)
         freed_objects << x
       end
     end
 
-    weak_refs_lost = [ ]
+    weak_refs_changed = [ ]
+    r_opts = opts.dup
+    r_opts[:highlight_slots] = [ ]
+    r_opts[:highlight_objects] = [ ]
+    r_opts[:highlight_edges] = [ ]
     mem.objects.
-      select{|wr| WeakRef === wr and freed_objects.include?(wr.value) }.
-      each do | wr |
+    select{|wr| WeakRef === wr and freed_objects.include?(wr.value) }.
+    each do | wr |
       wr.value = nil
-      weak_refs_lost << wr
+      weak_refs_changed << wr
+      r_opts[:highlight_slots] << [ wr, 0 ]
+      render! "GC: #{wr.class}@#{mem.obj_id(wr)} value = nil", r_opts
+      r_opts[:highlight_slots].pop
+      if rq = wr.ref_queue
+        rq << wr
+        weak_refs_changed << rq
+        r_opts[:highlight_slots] << [ rq, rq.size - 1 ]
+        r_opts[:highlight_edges] << [ rq, rq.size - 1, wr ]
+        # r_opts[:highlight_objects] << rq
+        # r_opts[:highlight_objects] << wr
+        render! "GC: #{rq.class}@#{mem.obj_id(rq)} add!", r_opts
+      end
     end
 
-    r_opts = opts.dup
-    unless weak_refs_lost
-      r_opts[:highlight_objects] = weak_refs_lost
+    unless weak_refs_changed.empty?
+      if opts[:render_weak_ref!] != false
+        r_opts[:highlight_objects] = weak_refs_changed
+        render! "GC: WeakRefs changed", r_opts
+        r_opts = opts.dup
+      end
     end
+
     render! "GC: After Sweep (freed #{freed_objects.size})", r_opts
 
     self
@@ -396,6 +424,9 @@ class Renderer
     when Memory
       port = -1
       x.objects.each { | e | nodes << slot(x, e, :port => port += 1, :edge_style => 'style = "dotted", color = "grey"') }
+    when WeakRef
+      nodes << slot(x, x.value, :key => :value, :inspect_key => false, :port => 0, :edge_style => 'style = "dashed"')
+      nodes << slot(x, x.ref_queue, :key => :ref_queue, :inspect_key => false, :port => 1)
     when MarkBits
       port = -1
       x.each { | e | nodes << slot(x, e ? "MARK" : "----",
@@ -683,10 +714,24 @@ END
 
 Slide.slide! "Weak Reference", <<'END'
 * Useful for caching.
-* A Weak Reference maintain its reference, iff one or more non-weak reference also exist.
-* Soft References release references when under "memory pressure"
-* Reference Queues contain dead Weak References.
+* A Weak Reference maintain its reference, iff one or more non-weak references exists.
+* Reference Queues hold dead Weak References for later processing.
+* Soft References release references when under "memory pressure".
 END
+
+wr = rq = nil
+mem.eval! "Weak Reference", <<'END', :add_roots => [ :wr, :rq ], :highlight_objects => [ :wr, :rq ] # FIXME
+str = "Another String"
+rq = RefQueue.new
+wr = rq.add!(WeakRef.new(str))
+x << str; str = nil
+END
+
+mem.eval! "Remove Hard Reference", <<'END', :with_expr => true, :slide => false, :highlight_objects => [ wr, rq ]
+x[-1] = nil
+END
+
+Collector.new(mem, :render_mark! => false, :render_sweep! => false).collect!
 
 Slide.slide! "Weak Reference Support", <<'END'
 * JRuby
