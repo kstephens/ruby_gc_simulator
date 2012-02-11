@@ -1,4 +1,5 @@
 
+# module GCSimulator
 
 module Slide
   def slide! title, body, opts = nil
@@ -572,7 +573,7 @@ Slide.slide! "CRuby GC", <<'END'
 * Enova Financial
 * 2012/02/10
 * Code: "":http://github.com/kstephens/ruby_gc_simulator
-* Slides: "":http://kurtstephens.com/pub/ruby/ruby_gc_simulator/ruby_gc_simulator/
+* Slides: "":http://kurtstephens.com/pub/ruby/ruby_gc_simulator/slides/
 END
 
 a = b = c = nil
@@ -685,15 +686,15 @@ Slide.slide! "JRuby, Rubinius", <<'END'
 END
 
 Slide.slide! "Other GC Features", <<'END'
+* Lazy Sweep - already in CRuby.
 * Parallel Sweep - not seen yet.
 * Parallel Mark - prototype presented at RubyConf 2011.
-* Lazy Sweep - already in CRuby
-* N-color marking
+* N-color marking:
 ** Tredmill - "":https://github.com/kstephens/tredmill
 ** Needs Write Barrier
 * Generational - difficult, unlikely.
 ** Needs Write Barrier
-* Weak References
+* Weak References, Reference Queues
 END
 
 Slide.slide! "CRuby GC Options", <<'END'
@@ -715,7 +716,7 @@ Slide.slide! "Generational GC Is Hard", <<'END'
 * Write Barrier needed to keep track of changes to older or already marked objects.
 * Need to keep track of references from older generations to new generations.
 * CRuby API makes write barrier difficult.
-* Lua handles this by never exposing objects directly; stack only.
+* Lua GCG is simpler; API nevers expose references; stack operations only.
 END
 
 mem.eval! "Mutate older object", <<'END', :before => true, :slide => false, :with_expr => true, :highlight_slots => [ [ x, 3 ] ], :show_age => true
@@ -745,7 +746,7 @@ Collector.new(mem, :render_mark! => false, :render_sweep! => false).collect!
 
 Slide.slide! "Weak Reference Support", <<'END'
 * JRuby
-** Weak References, Soft References, Reference Queues.
+** JVM: Weak References, Soft References, Reference Queues.
 * Rubinius
 ** Weak References
 * CRuby
@@ -758,3 +759,4 @@ Slide.slide! "Q&A", <<'END'
 * Slides generated with Scarlet - "":http://github.com/kstephens/scarlet
 END
 
+# end # module

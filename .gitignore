@@ -1,3 +1,4 @@
 *.gv
-ruby_gc_simulator.textile
+slides.textile
+slides/
 ruby_gc_simulator/
